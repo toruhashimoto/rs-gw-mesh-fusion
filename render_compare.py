@@ -58,13 +58,31 @@ def main(argv=None):
         meta = json.load(fmeta)
     n_rs = int(meta["n_rs_faces"])
 
-    v_np = np.asarray(fused.vertices, dtype=np.float32)
-    f_np = np.asarray(fused.faces, dtype=np.int64)
-    # per-face color -> per-vertex color (patch vertices are disjoint from RS
-    # vertices because fuse() concatenates two vertex blocks)
-    colors = np.tile(RS_GRAY, (len(v_np), 1)).astype(np.float32)
-    patch_verts = np.unique(f_np[n_rs:])
-    colors[patch_verts] = PATCH_ORANGE
+    faces_all = np.asarray(fused.faces, dtype=np.int64)
+    rs_part = trimesh.Trimesh(fused.vertices, faces_all[:n_rs], process=False)
+    patch_part = (trimesh.Trimesh(fused.vertices, faces_all[n_rs:], process=False)
+                  if len(faces_all) > n_rs else None)
+
+    # nvdiffrast's CudaRaster supports ~2^24 triangles per draw; decimate the
+    # RS block (preview only) to stay under the limit, keep patches full-res.
+    MAX_TRIS = 14_000_000
+    n_patch = 0 if patch_part is None else len(patch_part.faces)
+    if n_rs + n_patch > MAX_TRIS:
+        target = MAX_TRIS - n_patch
+        print(f"[INFO] decimating RS block for preview: {n_rs:,} -> {target:,} faces")
+        rs_part = rs_part.simplify_quadric_decimation(face_count=target)
+
+    verts = [np.asarray(rs_part.vertices, dtype=np.float32)]
+    faces = [np.asarray(rs_part.faces, dtype=np.int64)]
+    cols = [np.tile(RS_GRAY, (len(rs_part.vertices), 1)).astype(np.float32)]
+    if patch_part is not None:
+        pv = np.asarray(patch_part.vertices, dtype=np.float32)
+        faces.append(np.asarray(patch_part.faces, dtype=np.int64) + len(verts[0]))
+        verts.append(pv)
+        cols.append(np.tile(PATCH_ORANGE, (len(pv), 1)).astype(np.float32))
+    v_np = np.concatenate(verts)
+    f_np = np.concatenate(faces)
+    colors = np.concatenate(cols)
 
     v = torch.tensor(v_np, dtype=torch.float32, device="cuda")
     f = torch.tensor(f_np, dtype=torch.int32, device="cuda")

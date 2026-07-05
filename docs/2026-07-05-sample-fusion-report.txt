@@ -1,0 +1,16 @@
+[INFO] RS mesh : D:\Claude\Photogrammetry\Sample_RS-ply\Project_____1.ply
+[INFO] GW mesh : D:\Claude\Photogrammetry\GW_Output\sample_ours\mesh_ours_2pivots_post.ply
+[INFO] RS: V=16,093,068 F=32,186,124
+[INFO] GW: V=3,085,860 F=6,145,904
+[INFO] RS median edge length = 0.0138936
+[INFO] alignment RS->GW: median=5.61107 p90=16.8373 p99=22.1191 (threshold 0.277873)
+[INFO] multi-scale ICP applied (fitness=0.751 rmse=0.0539968 scale=1.000070); rechecking
+[INFO] alignment after ICP: median=0.00998327
+[INFO] tau = 0.111149
+[INFO] faces beyond tau: 1,522,146 / 6,145,904
+[INFO] ROI (RS AABB +10%): 5,717,649 faces inside
+[INFO] after ROI: 1,093,891 faces
+[INFO] components: kept 73, removed 541 (< area 1.76655)
+[INFO] after 3-ring overlap dilation: 1,089,466 faces
+[INFO] patches: 1,089,466 faces, area 7020.5 (39.74% of RS area)
+[INFO] wrote D:\Claude\Photogrammetry\GW_Output\fusion_sample\fused.ply (V=16,655,402 F=33,275,590)
