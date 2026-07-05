@@ -33,21 +33,44 @@ def parse_args(argv):
     return p.parse_args(argv)
 
 
-def icp_refine(rs_mesh, gw_mesh, max_corr, n_sample=500_000, seed=0):
+def icp_refine(rs_mesh, gw_mesh, initial_median, med_edge, n_sample=300_000, seed=0):
+    """Multi-scale scaled ICP registering the GW mesh onto the RS mesh.
+
+    The correspondence-distance schedule starts above the measured
+    misalignment and shrinks toward the RS edge length; a single-shot ICP
+    with a small radius cannot converge when the initial offset is large
+    (validated on Sample_RS-ply: median 5.6 -> 0.009).
+    Source points are GW vertices inside the (expanded) RS AABB so that GW
+    background geometry does not pull the registration.
+    """
     import open3d as o3d
     rng = np.random.default_rng(seed)
 
-    def sample_pcd(mesh):
-        v = mesh.vertices.view(np.ndarray)
-        idx = rng.choice(len(v), min(n_sample, len(v)), replace=False)
+    def sample_pcd(points):
+        idx = rng.choice(len(points), min(n_sample, len(points)), replace=False)
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(v[idx])
+        pcd.points = o3d.utility.Vector3dVector(points[idx])
         return pcd
 
+    gv = gw_mesh.vertices.view(np.ndarray)
+    span = rs_mesh.bounds[1] - rs_mesh.bounds[0]
+    inb = np.all((gv >= rs_mesh.bounds[0] - 0.1 * span) &
+                 (gv <= rs_mesh.bounds[1] + 0.1 * span), axis=1)
+    src_pts = gv[inb] if inb.sum() > 10_000 else gv
+    src = sample_pcd(src_pts)
+    dst = sample_pcd(rs_mesh.vertices.view(np.ndarray))
+
+    mc0 = max(1.5 * initial_median, 8.0 * med_edge)
+    schedule = [max(mc0 / (4 ** k), 4.0 * med_edge) for k in range(4)]
     est = o3d.pipelines.registration.TransformationEstimationPointToPoint(with_scaling=True)
-    res = o3d.pipelines.registration.registration_icp(
-        sample_pcd(gw_mesh), sample_pcd(rs_mesh), max_corr, np.eye(4), est)
-    return np.asarray(res.transformation), float(res.fitness), float(res.inlier_rmse)
+    T = np.eye(4)
+    fitness = rmse = 0.0
+    for mc in schedule:
+        res = o3d.pipelines.registration.registration_icp(
+            src, dst, mc, T, est,
+            o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=60))
+        T, fitness, rmse = res.transformation, float(res.fitness), float(res.inlier_rmse)
+    return np.asarray(T), fitness, rmse
 
 
 def main(argv=None):
@@ -79,11 +102,14 @@ def main(argv=None):
     align_thresh = args.align_factor * rs_med_edge
     log(f"[INFO] alignment RS->GW: median={st['median']:.6g} p90={st['p90']:.6g} "
         f"p99={st['p99']:.6g} (threshold {align_thresh:.6g})")
+    T_applied = None
     if st["median"] > align_thresh and args.icp:
-        max_corr = 50.0 * rs_med_edge
-        T, fitness, rmse = icp_refine(rs, gw, max_corr, seed=args.seed)
+        T, fitness, rmse = icp_refine(rs, gw, st["median"], rs_med_edge, seed=args.seed)
         gw.apply_transform(T)
-        log(f"[INFO] ICP applied (fitness={fitness:.3f} rmse={rmse:.6g}); rechecking")
+        T_applied = T
+        scale = float(np.cbrt(np.linalg.det(T[:3, :3])))
+        log(f"[INFO] multi-scale ICP applied (fitness={fitness:.3f} rmse={rmse:.6g} "
+            f"scale={scale:.6f}); rechecking")
         gw_scene = fl.build_raycast_scene(gw.vertices, gw.faces)
         st = fl.alignment_stats(rs, gw_scene, seed=args.seed)
         log(f"[INFO] alignment after ICP: median={st['median']:.6g}")
@@ -134,6 +160,11 @@ def main(argv=None):
     fused.export(ply_path)
     log(f"[INFO] wrote {ply_path} (V={len(fused.vertices):,} F={len(fused.faces):,})")
     np.save(os.path.join(args.out, "patch_faces.npy"), np.flatnonzero(mask))
+    meta = {"n_rs_faces": int(len(rs.faces)), "n_patch_faces": int(n_patch),
+            "gw_to_rs_transform": (np.asarray(T_applied).tolist()
+                                   if T_applied is not None else None)}
+    with open(os.path.join(args.out, "fusion_meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
     if args.obj:
         obj_path = os.path.join(args.out, "fused.obj")
         fused.export(obj_path)

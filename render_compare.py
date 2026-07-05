@@ -1,11 +1,13 @@
 """Render fusion previews with nvdiffrast (CUDA context).
 
-RS geometry is painted gray, GW complement patches orange, so the added
-regions can be inspected before importing the fused mesh into RealityScan.
-Requires the MSVC/CUDA runtime env (run via run_fuse-style launcher or after
+Reads the fused mesh + fusion_meta.json: the first n_rs_faces faces (RS part)
+are painted gray, the remaining patch faces orange, so the added regions can
+be inspected before importing the fused mesh into RealityScan.
+Requires the MSVC/CUDA runtime env (run via a run_fuse-style launcher or after
 the nvdiffrast JIT cache is warm).
 """
 import argparse
+import json
 import os
 
 import imageio.v2 as imageio
@@ -41,9 +43,8 @@ def perspective(fovy_deg, aspect, near, far):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rs", required=True)
-    ap.add_argument("--gw", required=True)
-    ap.add_argument("--patch_npy", required=True)
+    ap.add_argument("--fused", required=True, help="fused.ply from fuse_meshes.py")
+    ap.add_argument("--meta", required=True, help="fusion_meta.json from fuse_meshes.py")
     ap.add_argument("--out", required=True)
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--height", type=int, default=960)
@@ -52,26 +53,22 @@ def main(argv=None):
 
     import nvdiffrast.torch as dr
 
-    rs = trimesh.load(args.rs, process=False)
-    gw = trimesh.load(args.gw, process=False)
-    patch_idx = np.load(args.patch_npy)
+    fused = trimesh.load(args.fused, process=False)
+    with open(args.meta, encoding="utf-8") as fmeta:
+        meta = json.load(fmeta)
+    n_rs = int(meta["n_rs_faces"])
 
-    rs_v = np.asarray(rs.vertices, dtype=np.float32)
-    rs_f = np.asarray(rs.faces, dtype=np.int64)
-    patch = gw.submesh([patch_idx], append=True) if len(patch_idx) else None
+    v_np = np.asarray(fused.vertices, dtype=np.float32)
+    f_np = np.asarray(fused.faces, dtype=np.int64)
+    # per-face color -> per-vertex color (patch vertices are disjoint from RS
+    # vertices because fuse() concatenates two vertex blocks)
+    colors = np.tile(RS_GRAY, (len(v_np), 1)).astype(np.float32)
+    patch_verts = np.unique(f_np[n_rs:])
+    colors[patch_verts] = PATCH_ORANGE
 
-    verts = [rs_v]
-    faces = [rs_f]
-    cols = [np.tile(RS_GRAY, (len(rs_v), 1))]
-    if patch is not None:
-        pv = np.asarray(patch.vertices, dtype=np.float32)
-        faces.append(np.asarray(patch.faces, dtype=np.int64) + len(rs_v))
-        verts.append(pv)
-        cols.append(np.tile(PATCH_ORANGE, (len(pv), 1)))
-
-    v = torch.tensor(np.concatenate(verts), dtype=torch.float32, device="cuda")
-    f = torch.tensor(np.concatenate(faces), dtype=torch.int32, device="cuda")
-    c = torch.tensor(np.concatenate(cols), dtype=torch.float32, device="cuda")
+    v = torch.tensor(v_np, dtype=torch.float32, device="cuda")
+    f = torch.tensor(f_np, dtype=torch.int32, device="cuda")
+    c = torch.tensor(colors, dtype=torch.float32, device="cuda")
 
     center = v.mean(dim=0)
     ext = float((v.max(dim=0).values - v.min(dim=0).values).norm())

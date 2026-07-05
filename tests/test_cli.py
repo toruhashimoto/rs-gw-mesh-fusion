@@ -45,6 +45,31 @@ def test_cli_zero_patches_when_identical(tmp_path):
     assert stats["n_patch_faces"] == 0                   # normal exit, explicit zero
 
 
+def test_cli_icp_recovers_large_offset(tmp_path):
+    # dense asymmetric shape so ICP has features to lock onto
+    rs = trimesh.creation.box(extents=[2, 2, 2])
+    for _ in range(5):
+        rs = rs.subdivide()
+    gw_main = rs.copy()
+    gw_main.apply_translation([4.0, 0.0, 0.0])          # offset >> align threshold
+    sph = trimesh.creation.icosphere(subdivisions=2, radius=0.3)
+    sph.apply_translation([4.0, 0.0, 1.5])              # complement, moves with GW frame
+    gw = trimesh.util.concatenate([gw_main, sph])
+    rs_p, gw_p = str(tmp_path / "rs.ply"), str(tmp_path / "gw.ply")
+    rs.export(rs_p)
+    gw.export(gw_p)
+    out = str(tmp_path / "o")
+    stats = fuse_meshes.main(["--rs", rs_p, "--gw", gw_p, "--out", out, "--icp",
+                              "--tau", "0.05", "--roi_expand", "0.5",
+                              "--overlap_rings", "1"])
+    assert stats["alignment"]["median"] < 0.05           # ICP recovered the frame
+    assert stats["n_patch_faces"] > 0                    # sphere added as patch
+    import json
+    with open(os.path.join(out, "fusion_meta.json"), encoding="utf-8") as f:
+        meta = json.load(f)
+    assert meta["gw_to_rs_transform"] is not None        # transform recorded
+
+
 def test_cli_alignment_failure_exits_2(tmp_path):
     rs = trimesh.creation.box(extents=[2, 2, 2])
     gw = trimesh.creation.box(extents=[2, 2, 2])
