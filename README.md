@@ -1,8 +1,19 @@
 # MeshFusion
 
+![Status: Beta](https://img.shields.io/badge/status-beta-orange)
+![License: Non--commercial research](https://img.shields.io/badge/license-non--commercial%20research-lightgrey)
+
 **Fuse a RealityScan High Detail mesh with a 3DGS-derived complement mesh into a single model — then texture it as one model in RealityScan.**
 
 [日本語版 README はこちら / Japanese README](README.ja.md)
+
+> [!WARNING]
+> **Beta.** The full pipeline (fusion → RealityScan import → texturing) has been
+> verified end-to-end, but so far on a **single indoor scene** (74 photos,
+> 32M-face RS mesh × 6M-face Gaussian Wrapping mesh). Not yet validated:
+> a variety of scene types and scales, other RealityScan versions / PLY-import
+> behavior, and the `--roi_json` workflow on real captures. Parameter defaults
+> may change. Feedback and reports via GitHub Issues are very welcome.
 
 RealityScan can import external models, but it cannot merge multiple models into
 one, and texturing always happens per model. MeshFusion solves this: it keeps

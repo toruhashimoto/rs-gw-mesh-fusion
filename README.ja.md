@@ -1,8 +1,19 @@
 # MeshFusion（日本語版）
 
+![Status: Beta](https://img.shields.io/badge/status-beta-orange)
+![License: Non--commercial research](https://img.shields.io/badge/license-non--commercial%20research-lightgrey)
+
 **RealityScan の High Detail メッシュと、3DGS 由来の補完メッシュを1つのモデルに融合し、RealityScan で「単一モデルとして」テクスチャ生成するためのツール。**
 
 [English README](README.md)
+
+> [!WARNING]
+> **ベータ版です。** 融合 → RealityScan インポート → テクスチャ生成の全工程は
+> end-to-end で動作確認済みですが、実データ検証は現時点で**屋内1シーンのみ**
+>（写真74枚、RS 3,220万面 × Gaussian Wrapping 615万面）。多様なシーン・スケール、
+> RealityScan の他バージョンでの PLY インポート挙動、実データでの `--roi_json`
+> ワークフローは未検証です。パラメータの既定値は今後変わる可能性があります。
+> 不具合報告・フィードバックは GitHub Issues へお願いします。
 
 RealityScan はモデルのインポートはできますが、複数モデルを1つに合成することは
 できず、テクスチャもモデルごとに生成されます。MeshFusion は、RealityScan の
