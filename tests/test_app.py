@@ -27,6 +27,21 @@ def test_run_fusion_generator_end_to_end(tmp_path):
     assert os.path.isfile(os.path.join(out, "fused.ply"))
 
 
+def test_run_fusion_none_optionals(tmp_path):
+    # regression class: Gradio passes None for untouched/cleared fields
+    rs = trimesh.creation.box(extents=[2, 2, 2])
+    rs_p, gw_p = str(tmp_path / "rs.ply"), str(tmp_path / "gw.ply")
+    rs.export(rs_p)
+    rs.export(gw_p)
+    results = list(app.run_fusion(
+        rs_p, gw_p, str(tmp_path / "o"), None,
+        tau_factor=None, tau_abs=None, roi_expand=None,
+        min_patch_area_ratio=None, overlap_rings=None,
+        use_icp=True, do_clean=False, export_obj=False, make_preview=False))
+    log = results[-1][0]
+    assert "[DONE]" in log and "None" not in log.split("fuse_meshes.py")[-1].split("\n")[0]
+
+
 def test_run_fusion_rejects_missing_input(tmp_path):
     results = list(app.run_fusion(
         str(tmp_path / "nope.ply"), str(tmp_path / "nope2.ply"), str(tmp_path / "o"),

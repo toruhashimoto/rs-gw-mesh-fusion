@@ -49,10 +49,14 @@ def run_fusion(rs_path, gw_path, out_dir, roi_json, tau_factor, tau_abs,
         return
     os.makedirs(out_dir, exist_ok=True)
 
+    # Gradio delivers None for cleared/untouched number fields - fall back to
+    # the CLI defaults instead of emitting "None" into the command line.
     cmd = [sys.executable, FUSE, "--rs", rs_path, "--gw", gw_path, "--out", out_dir,
-           "--tau_factor", str(tau_factor), "--roi_expand", str(roi_expand),
-           "--min_patch_area_ratio", str(min_patch_area_ratio),
-           "--overlap_rings", str(int(overlap_rings))]
+           "--tau_factor", str(tau_factor if tau_factor is not None else 8.0),
+           "--roi_expand", str(roi_expand if roi_expand is not None else 0.10),
+           "--min_patch_area_ratio",
+           str(min_patch_area_ratio if min_patch_area_ratio is not None else 1e-4),
+           "--overlap_rings", str(int(overlap_rings if overlap_rings is not None else 3))]
     if tau_abs and float(tau_abs) > 0:
         cmd += ["--tau", str(tau_abs)]
     if roi_json:
