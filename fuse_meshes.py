@@ -27,6 +27,9 @@ def parse_args(argv):
     p.add_argument("--min_patch_area_ratio", type=float, default=1e-4)
     p.add_argument("--overlap_rings", type=int, default=3)
     p.add_argument("--icp", action="store_true", help="allow scaled ICP refinement of the GW mesh")
+    p.add_argument("--clean", action="store_true",
+                   help="drop degenerate/duplicate faces before export "
+                        "(reduces RealityScan non-manifold warnings)")
     p.add_argument("--obj", action="store_true", help="also export fused.obj (large!)")
     p.add_argument("--align_factor", type=float, default=20.0)
     p.add_argument("--seed", type=int, default=0)
@@ -160,11 +163,19 @@ def main(argv=None):
     else:
         log(f"[INFO] patches: {n_patch:,} faces, area {patch_area:.6g} "
             f"({patch_area / rs.area:.2%} of RS area)")
+    n_rs_faces_out = int(len(rs.faces))
+    if args.clean:
+        fused, cstats = fl.clean_mesh(fused)
+        # the RS block stays first after cleaning; recompute its length
+        n_rs_faces_out = int((cstats["kept_face_indices"] < len(rs.faces)).sum())
+        n_patch = len(fused.faces) - n_rs_faces_out
+        log(f"[INFO] clean: removed {cstats['faces_removed']:,} faces, "
+            f"{cstats['vertices_removed']:,} vertices")
     ply_path = os.path.join(args.out, "fused.ply")
     fused.export(ply_path)
     log(f"[INFO] wrote {ply_path} (V={len(fused.vertices):,} F={len(fused.faces):,})")
     np.save(os.path.join(args.out, "patch_faces.npy"), np.flatnonzero(mask))
-    meta = {"n_rs_faces": int(len(rs.faces)), "n_patch_faces": int(n_patch),
+    meta = {"n_rs_faces": n_rs_faces_out, "n_patch_faces": int(n_patch),
             "gw_to_rs_transform": (np.asarray(T_applied).tolist()
                                    if T_applied is not None else None)}
     with open(os.path.join(args.out, "fusion_meta.json"), "w", encoding="utf-8") as f:

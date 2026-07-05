@@ -1,69 +1,127 @@
-# MeshFusion — RealityScan High Detail メッシュの GaussianWrapping 補完融合
+# MeshFusion
 
-RealityScan (RS) は複数モデルを1つに合成できず、テクスチャもモデル別になるため、
-**RS の High Detail メッシュ（主）+ GaussianWrapping (GW) メッシュ（補完）を
-1ファイルの単一モデルに融合**するツール。融合結果を RS にインポートすれば、
-単一モデルとして RS でテクスチャ生成できる。
+**Fuse a RealityScan High Detail mesh with a 3DGS-derived complement mesh into a single model — then texture it as one model in RealityScan.**
 
-設計書: `docs/specs/2026-07-05-mesh-fusion-design.md` / 実装計画: `docs/plans/2026-07-05-mesh-fusion.md`
+[日本語版 README はこちら / Japanese README](README.ja.md)
 
-## 使い方
+RealityScan can import external models, but it cannot merge multiple models into
+one, and texturing always happens per model. MeshFusion solves this: it keeps
+your RealityScan **High Detail mesh untouched as the primary surface**, cuts
+**complement patches** out of a second mesh (e.g. one produced by
+[Gaussian Wrapping](https://github.com/diego1401/GaussianWrapping) from the same
+photo set — great at thin structures and low-texture regions where
+photogrammetry struggles), and writes a **single fused PLY** you can re-import
+into RealityScan and texture as one model.
 
-```bat
-run_fuse.bat --rs <RSメッシュ.ply> --gw <GWメッシュ.ply> --out <出力Dir> --icp
+- **CPU-only core** — distance queries (embree BVH via Open3D), ICP alignment
+  and patch selection all run on CPU. No GPU required for fusion.
+- **Non-destructive** — input meshes are never modified; the RS mesh is never
+  transformed (the complement mesh is registered onto it).
+- **Semi-automated by design** — every run writes a report and optional
+  previews (gray = RS, orange = added patches) so you can inspect and re-tune
+  before committing.
+- Verified on a 32M-face RealityScan export fused with a 6M-face Gaussian
+  Wrapping mesh.
+
+## Install
+
+```bash
+git clone https://github.com/toruhashimoto/rs-gw-mesh-fusion
+cd rs-gw-mesh-fusion
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
 ```
 
-- 実行環境は conda env `gaussian_wrapping`（run_fuse.bat が環境変数ごと設定）
-- 入力は一切変更しない。RS メッシュは常に不動（座標補正は GW 側のみ）
-- 出力: `fused.ply`（RS 座標系・頂点カラー付き）/ `fusion_report.txt` / `fusion_meta.json` /
-  `patch_faces.npy` / `--obj` 指定時のみ `fused.obj`
-- プレビュー（RS=グレー、補完パッチ=オレンジ）:
+Python 3.10+ on Windows (the tool is developed and tested on Windows; the
+Python core itself is platform-neutral).
 
-```bat
-<env python> render_compare.py --fused <out>\fused.ply --meta <out>\fusion_meta.json --out <out>
+## Quick start
+
+**Desktop app (local Gradio UI):** double-click `launch_app.bat`, or:
+
+```bash
+python app.py
 ```
 
-## 重要な発見（Sample データで実証）
+**CLI:**
 
-**RealityScan の「メッシュエクスポート」と「COLMAP エクスポート」は座標系が一致しない**
-（Sample では原点周りの微小回転相当、中央値ズレ 5.6 ユニット。スケールは一致 1.00007）。
-このため `--icp` は事実上必須。多段 ICP（対応距離を初期ズレ→エッジ長へ4段階縮小、
-前半2段は剛体・後半のみスケール推定）で 中央値 0.010（RS エッジ長未満）まで収束する。
+```bash
+run_fuse.bat --rs rs_high_detail.ply --gw complement.ply --out out\fusion --icp
+```
 
-ICP のソース点は **RS のタイト AABB 内の GW 頂点のみ**を使う（AABB を拡張すると
-GW の背景断片が混入してスケールが 0.87 に崩壊する — 実測済みの罠）。
+Outputs in `--out`: `fused.ply` (single model, vertex colors kept),
+`fusion_report.txt`, `fusion_meta.json`, `patch_faces.npy`, and with `--obj`
+also `fused.obj`.
 
-## 処理フロー
+Then in RealityScan: **Import Model** → select the imported model → **Texture**.
+RealityScan may warn about non-manifold edges (the fused model intentionally
+contains separate shells); its built-in cleaning handles this, or pass
+`--clean` to pre-remove degenerate/duplicate faces.
 
-1. **位置合わせ検証**: RS 頂点→GW 表面の距離統計。中央値 > `エッジ長×20` なら停止
-   （`--icp` 指定時は多段 ICP 後に再判定）
-2. **パッチ選定**: GW 面のうち RS 表面から `tau`（既定=RSエッジ長×8）超の面
-   → ROI（既定=RS AABB+10%、`--roi_json` で Blender 凸包指定可）内に制限
-   → 面積が RS 総面積×`1e-4` 未満の破片成分を除去 → 境界を3リング膨張して RS と重ねる
-3. **結合**: RS + パッチを連結して単一 PLY 出力（トポロジは非連結のまま =
-   RS の投影テクスチャには問題なし）
+## Why `--icp` is (practically) required
 
-## チューニング指針
+**RealityScan's mesh export and its COLMAP export do not share a coordinate
+frame** (we measured a small rotation about the origin — a median offset of
+5.6 scene units on our test scene; scale is identical). Since a 3DGS
+reconstruction lives in the COLMAP frame, the complement mesh must be
+registered onto the RS mesh first. MeshFusion does this with a multi-scale ICP
+(correspondence distance shrinking from the measured misalignment down to the
+RS edge length, rigid first, scale-enabled only at the finest stages) and
+reaches sub-edge-length accuracy. Without `--icp`, a frame mismatch is
+detected and the run stops with a clear error instead of producing garbage.
 
-| 症状 | 対処 |
+## How it works
+
+1. **Alignment check** — RS-vertex → complement-surface distance statistics;
+   stops (or runs ICP with `--icp`) when the frames don't match.
+2. **Patch selection** — complement faces farther than `tau` (default:
+   8 × RS median edge length) from the RS surface, restricted to an ROI
+   (default: RS bounding box + 10%; or a convex-hull JSON via `--roi_json`,
+   compatible with Gaussian Wrapping's Blender bounding-volume add-on),
+   with small confetti components removed and patch borders dilated a few
+   rings so they overlap the RS surface (projection texturing is unaffected
+   by overlaps).
+3. **Fusion** — RS mesh + patches concatenated into one PLY. Topology stays
+   disconnected on purpose: RealityScan textures by projection and does not
+   need a watertight, connected mesh — just a single model.
+
+## Tuning
+
+| Symptom | Fix |
 |---|---|
-| 補完が多すぎる / 部屋の壁・床まで付く | `--roi_json`（Blender で対象物の箱を書いてエクスポート、GaussianWrapping の GW Bounds アドオン使用）で対象物に限定。または `--roi_expand 0` |
-| 細かい破片が残る | `--min_patch_area_ratio` を上げる（例 `1e-3`） |
-| 補完が足りない / RS の穴が埋まらない | `--tau_factor` を下げる（例 `4`）。GW 由来の面がより多く採用される |
-| 座標系エラーで停止 | `--icp` を付ける（推奨: 常時付与） |
+| Too much complement (room walls/floor get added) | Provide `--roi_json` around your object, or `--roi_expand 0` |
+| Small fragments remain | Raise `--min_patch_area_ratio` (e.g. `1e-3`) |
+| Holes in the RS mesh are not filled | Lower `--tau_factor` (e.g. `4`) |
+| "Meshes do not appear to share a coordinate frame" | Add `--icp` (recommended always) |
+| RealityScan non-manifold warnings | Add `--clean`, and/or accept RS's cleaning prompt |
 
-Sample_RS-ply での実測: パッチ 109万面（RS 面積比 39.7%）、うち78%は「GW だけが
-再構成した部屋の大きな連続面」1成分。対象物だけ欲しい場合は ROI 指定が有効。
+## Full pipeline (RealityScan × Gaussian Wrapping)
 
-## RealityScan 側の手順
+See [docs/pipeline-guide.md](docs/pipeline-guide.md) for the end-to-end
+workflow — RealityScan capture → COLMAP export → Gaussian Wrapping training &
+mesh extraction (including the Windows / RTX 50-series build notes:
+`NVCC_APPEND_FLAGS=-DUSE_CUDA` and friends) → fusion → texturing in
+RealityScan.
 
-1. `fused.ply` を RS プロジェクトに **Import Model**
-2. インポートしたモデルを選択して **Texture** を実行（撮影画像から単一モデルとして投影テクスチャ生成）
-3. PLY が読めない場合は `--obj` を付けて `fused.obj` を使用（32M面級ではファイル巨大・時間注意）
+## Tests
 
-## テスト
-
-```bat
-<env python> -m pytest tests -m "not slow"   # 単体 12件
-<env python> -m pytest tests -m slow          # 擬似データ統合（GWメッシュに人工穴→復元検証）
+```bash
+pytest tests -m "not slow"    # unit tests
+pytest tests -m slow          # integration: cuts holes into a real mesh and
+                              # verifies they are recovered as patches
 ```
+
+## License
+
+Non-commercial research use, following the terms of the Gaussian-Splatting
+License — see [LICENSE.md](LICENSE.md). Gaussian Wrapping, gaussian-splatting
+and nvdiffrast (optional preview dependency) are not bundled and carry their
+own licenses.
+
+## Acknowledgements
+
+Built to complement [Gaussian Wrapping](https://github.com/diego1401/GaussianWrapping)
+("From Blobs to Spokes: High-Fidelity Surface Reconstruction via Oriented
+Gaussians", Gomez et al., 2026) and Epic Games' RealityScan. Uses
+[trimesh](https://trimesh.org/), [Open3D](http://www.open3d.org/) and
+optionally [nvdiffrast](https://github.com/NVlabs/nvdiffrast).

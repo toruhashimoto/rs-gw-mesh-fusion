@@ -99,6 +99,28 @@ def dilate_faces(gw_mesh, face_mask, rings):
     return mask
 
 
+def clean_mesh(mesh):
+    """Light cleanup: drop degenerate/duplicate faces and unreferenced vertices.
+
+    Reduces (but does not fully eliminate) non-manifold-edge warnings when the
+    fused mesh is imported into RealityScan; RS's own cleaning tool remains the
+    final word on topology. Vertex colors are kept in sync by trimesh.
+    """
+    m = mesh.copy()
+    n_f0, n_v0 = len(m.faces), len(m.vertices)
+    mask1 = m.nondegenerate_faces()
+    m.update_faces(mask1)
+    mask2 = m.unique_faces()
+    m.update_faces(mask2)
+    m.remove_unreferenced_vertices()
+    # original face indices that survived (update_faces preserves order)
+    kept = np.flatnonzero(mask1)[mask2]
+    stats = {"faces_removed": n_f0 - len(m.faces),
+             "vertices_removed": n_v0 - len(m.vertices),
+             "kept_face_indices": kept}
+    return m, stats
+
+
 def _vertex_colors_or_gray(mesh):
     try:
         vc = np.asarray(mesh.visual.vertex_colors)

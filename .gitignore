@@ -4,3 +4,5 @@ output/
 .pytest_cache/
 *.ply
 *.npy
+local_env.bat
+.venv/

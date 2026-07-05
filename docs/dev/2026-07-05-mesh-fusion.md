@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Env python: `C:\Users\toruh\miniconda3\envs\gaussian_wrapping\python.exe` (below: `%PY%`)
+- Env python: `<env python>` (below: `%PY%`)
 - Tool root: `D:\Claude\Photogrammetry\MeshFusion\`
 - Inputs are NEVER modified on disk (non-destructive principle)
 - RS mesh is never transformed; ICP (opt-in) transforms the GW mesh only

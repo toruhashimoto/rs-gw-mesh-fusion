@@ -1,0 +1,15 @@
+# MeshFusion core (CPU-only)
+numpy
+scipy
+trimesh>=4.0
+open3d>=0.18
+fast-simplification
+imageio
+gradio>=4.0
+
+# Optional, ONLY for preview rendering (render_compare.py):
+#   a CUDA-enabled torch build + nvdiffrast (see https://nvlabs.github.io/nvdiffrast/)
+# The fusion itself never needs a GPU.
+
+# Development
+pytest

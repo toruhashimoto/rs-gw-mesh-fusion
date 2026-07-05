@@ -6,8 +6,8 @@ import pytest
 import trimesh
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from fusion_lib import (alignment_stats, build_raycast_scene, median_edge_length,
-                        unsigned_distance)
+from fusion_lib import (alignment_stats, build_raycast_scene, clean_mesh,
+                        median_edge_length, unsigned_distance)
 
 
 def unit_box():
@@ -25,6 +25,25 @@ def test_unsigned_distance_on_box_surface_and_offset():
 def test_median_edge_length_box():
     m = unit_box()
     assert median_edge_length(m) == pytest.approx(np.median(m.edges_unique_length), rel=1e-6)
+
+
+def test_clean_mesh_removes_degenerate_and_duplicate_faces():
+    box = unit_box()
+    v = np.vstack([box.vertices, [[9.0, 9.0, 9.0]]])          # + unreferenced vertex
+    f = np.vstack([box.faces,
+                   box.faces[0],                              # duplicate face
+                   [0, 0, 1]])                                # degenerate face
+    colors = np.full((len(v), 4), [10, 20, 30, 255], dtype=np.uint8)
+    dirty = trimesh.Trimesh(v, f, vertex_colors=colors, process=False)
+
+    cleaned, stats = clean_mesh(dirty)
+    assert len(cleaned.faces) == len(box.faces)
+    assert len(cleaned.vertices) == len(box.vertices)          # unreferenced dropped
+    assert stats["faces_removed"] == 2
+    assert stats["vertices_removed"] == 1
+    vc = np.asarray(cleaned.visual.vertex_colors)
+    assert vc.shape[0] == len(cleaned.vertices)                # colors stay in sync
+    assert (vc[0][:3] == [10, 20, 30]).all()
 
 
 def test_alignment_stats_detects_offset():

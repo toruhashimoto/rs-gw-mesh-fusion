@@ -1,6 +1,6 @@
 # mesh_fusion 設計書 — RealityScan High Detail メッシュの GaussianWrapping 補完融合
 
-日付: 2026-07-05 / 承認: ハシモトさん（対話にて設計承認済み）
+日付: 2026-07-05 / 設計は対話レビューで承認済み
 
 ## 目的
 
@@ -69,9 +69,9 @@ run_fuse.bat     … 環境変数設定込みランチャー（ASCII、windows-l
    融合で削除領域が GW パッチとして復元されること、背景破片が混入しないことを定量確認
    （復元率 = 削除領域内の補完面積 / 削除面積、混入 = ROI 外採用面数 0）
 2. **実データ検証**: Sample_RS-ply × GW メッシュ（`GW_Output\sample_ours`）で融合 →
-   レポート・プレビューを人が確認 → RS インポート + Texture はハシモトさん側で最終確認
+   レポート・プレビューを人が確認 → RS インポート + Texture はthe project owner側で最終確認
 
 ## 未確定・留意事項
 
-- RS 2.x の PLY インポート可否はハシモトさん環境で要確認（不可なら fused.obj を使用）
+- RS 2.x の PLY インポート可否はthe project owner環境で要確認（不可なら fused.obj を使用）
 - RS メッシュが法線/頂点カラーを持たない場合も動作すること（法線は再計算）
