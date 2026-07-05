@@ -46,26 +46,30 @@ def icp_refine(rs_mesh, gw_mesh, initial_median, med_edge, n_sample=300_000, see
     import open3d as o3d
     rng = np.random.default_rng(seed)
 
-    def sample_pcd(points):
-        idx = rng.choice(len(points), min(n_sample, len(points)), replace=False)
+    def sample_pcd(points, n):
+        idx = rng.choice(len(points), min(n, len(points)), replace=False)
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points[idx])
         return pcd
 
     gv = gw_mesh.vertices.view(np.ndarray)
-    span = rs_mesh.bounds[1] - rs_mesh.bounds[0]
-    inb = np.all((gv >= rs_mesh.bounds[0] - 0.1 * span) &
-                 (gv <= rs_mesh.bounds[1] + 0.1 * span), axis=1)
+    # TIGHT RS AABB on purpose: expanding it pulls GW background fragments
+    # into the source cloud and the scaled ICP collapses (validated on
+    # Sample_RS-ply: +10% expansion -> scale 0.87 / median 1.16; tight ->
+    # scale 1.0000 / median 0.0089).
+    inb = np.all((gv >= rs_mesh.bounds[0]) & (gv <= rs_mesh.bounds[1]), axis=1)
     src_pts = gv[inb] if inb.sum() > 10_000 else gv
-    src = sample_pcd(src_pts)
-    dst = sample_pcd(rs_mesh.vertices.view(np.ndarray))
+    src = sample_pcd(src_pts, n_sample // 2)
+    dst = sample_pcd(rs_mesh.vertices.view(np.ndarray), n_sample)
 
     mc0 = max(1.5 * initial_median, 8.0 * med_edge)
     schedule = [max(mc0 / (4 ** k), 4.0 * med_edge) for k in range(4)]
-    est = o3d.pipelines.registration.TransformationEstimationPointToPoint(with_scaling=True)
+    rigid = o3d.pipelines.registration.TransformationEstimationPointToPoint(with_scaling=False)
+    scaled = o3d.pipelines.registration.TransformationEstimationPointToPoint(with_scaling=True)
     T = np.eye(4)
     fitness = rmse = 0.0
-    for mc in schedule:
+    for i, mc in enumerate(schedule):
+        est = rigid if i < 2 else scaled  # scale only once coarsely locked
         res = o3d.pipelines.registration.registration_icp(
             src, dst, mc, T, est,
             o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=60))
